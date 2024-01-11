@@ -24,9 +24,9 @@ import org.bouncycastle.asn1.pkcs.Attribute;
 import org.bouncycastle.asn1.pkcs.PKCSObjectIdentifiers;
 import org.bouncycastle.asn1.x500.X500Name;
 import org.bouncycastle.asn1.x509.Extensions;
+import org.bouncycastle.cert.CertIOException;
 import org.bouncycastle.cert.X509CertificateHolder;
 import org.bouncycastle.cert.X509v3CertificateBuilder;
-import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.bouncycastle.operator.OperatorCreationException;
 import org.bouncycastle.pkcs.PKCS10CertificationRequest;
@@ -35,6 +35,7 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 
+import ch.migros.quantumproto.hybrid.HybridCertificateBuilder;
 import ch.migros.quantumproto.util.CertificateUtils;
 import ch.migros.quantumproto.util.KeyGenUtils;
 
@@ -110,7 +111,7 @@ public class CertAuthApp {
      */
     private static void create_root_certificate(String mapKey, String sigAlg)
             throws OperatorCreationException, NoSuchAlgorithmException,
-            NoSuchProviderException, InvalidAlgorithmParameterException {
+            NoSuchProviderException, InvalidAlgorithmParameterException, CertIOException {
         if (keyPairs.containsKey(mapKey))
             throw new IllegalStateException("Already created root certificate before");
 
@@ -127,7 +128,7 @@ public class CertAuthApp {
         keyPairs.put(mapKey, pair);
 
         // Build self-signed certificate
-        X509v3CertificateBuilder builder = new JcaX509v3CertificateBuilder(issuerSubject, BigInteger.ONE,
+        X509v3CertificateBuilder builder = HybridCertificateBuilder.createBuilder(issuerSubject, BigInteger.ONE,
                 notBDate, notADate, issuerSubject, pair.getPublic());
         X509CertificateHolder cert = CertificateUtils.signCert(builder, sigAlg, pair);
         certs.put(mapKey, cert);

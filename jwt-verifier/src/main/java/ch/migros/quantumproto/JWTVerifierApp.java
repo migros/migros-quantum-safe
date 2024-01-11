@@ -11,6 +11,7 @@ import java.security.Security;
 import java.util.Base64;
 import java.util.Base64.Decoder;
 
+import org.bouncycastle.asn1.misc.MiscObjectIdentifiers;
 import org.bouncycastle.cert.X509CertificateHolder;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.bouncycastle.operator.ContentVerifier;
@@ -21,6 +22,7 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 
+import ch.migros.quantumproto.util.AlgorithmNameUtils;
 import ch.migros.quantumproto.util.CertificateUtils;
 import ch.migros.quantumproto.util.JWTUtils;
 import ch.migros.quantumproto.util.SignatureUtils;
@@ -184,9 +186,10 @@ class VerifyHandler implements HttpHandler {
             System.out.println("Verification succeeded.");
 
             // Short summary of security
-            boolean rootIsHybrid = false;
-            boolean clientHasCompositePublicKey = false;
-            boolean jwtIsComposite = false;
+            boolean rootIsHybrid = CertificateUtils.isHybridCert(rootCert);
+            boolean clientHasCompositePublicKey = cert.getSubjectPublicKeyInfo().getAlgorithm()
+                    .getAlgorithm().equals(MiscObjectIdentifiers.id_composite_key);
+            boolean jwtIsComposite = AlgorithmNameUtils.isCompositeName(sigAlg);
 
             // Craft response
             String response = "I'm glad you got that signed :)\nYour header: " + header.toString()

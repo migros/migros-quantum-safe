@@ -11,9 +11,16 @@ import java.security.spec.AlgorithmParameterSpec;
 import java.security.spec.ECGenParameterSpec;
 import java.security.spec.RSAKeyGenParameterSpec;
 
+import org.bouncycastle.jcajce.CompositePrivateKey;
+import org.bouncycastle.jcajce.CompositePublicKey;
+import org.bouncycastle.jcajce.spec.CompositeAlgorithmSpec;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.bouncycastle.pqc.jcajce.spec.DilithiumParameterSpec;
 import org.bouncycastle.pqc.jcajce.spec.FalconParameterSpec;
+
+import ch.migros.quantumproto.hybrid.NestedAlgorithmSpec;
+import ch.migros.quantumproto.hybrid.NestedPrivateKey;
+import ch.migros.quantumproto.hybrid.NestedPublicKey;
 
 public class KeyGenUtils {
 
@@ -34,6 +41,32 @@ public class KeyGenUtils {
      */
     public static KeyPair generateKeyPair(String algorithmName)
             throws NoSuchAlgorithmException, NoSuchProviderException, InvalidAlgorithmParameterException {
+        if (AlgorithmNameUtils.isCompositeName(algorithmName)) {
+            CompositeAlgorithmSpec spec = AlgorithmNameUtils.getCompositeAlgorithmSpec(algorithmName);
+            String comp1 = spec.getAlgorithmNames().get(0);
+            String comp2 = spec.getAlgorithmNames().get(1);
+
+            KeyPair pair1 = generateKeyPair(comp1);
+            KeyPair pair2 = generateKeyPair(comp2);
+
+            CompositePublicKey compositePublicKey = new CompositePublicKey(pair1.getPublic(), pair2.getPublic());
+            CompositePrivateKey compositePrivateKey = new CompositePrivateKey(pair1.getPrivate(),
+                    pair2.getPrivate());
+            return new KeyPair(compositePublicKey, compositePrivateKey);
+        } else if (AlgorithmNameUtils.isNestedName(algorithmName)) {
+            NestedAlgorithmSpec spec = AlgorithmNameUtils.getNestedAlgorithmSpec(algorithmName);
+            String outer = spec.getOuterAlgorithmName();
+            String inner = spec.getInnerAlgorithmName();
+
+            KeyPair outerPair = generateKeyPair(outer);
+            KeyPair innerPair = generateKeyPair(inner);
+
+            NestedPublicKey nestedPublicKey = new NestedPublicKey(outerPair.getPublic(), innerPair.getPublic(), spec);
+            NestedPrivateKey nestedPrivateKey = new NestedPrivateKey(outerPair.getPrivate(), innerPair.getPrivate(),
+                    spec);
+            return new KeyPair(nestedPublicKey, nestedPrivateKey);
+        }
+
         // Map algorithmName for signatures to algorithmName for keyPairGenerator
         String keyAlgName = AlgorithmNameUtils.mapSigToKeyAlgorithmName(algorithmName);
 
@@ -65,6 +98,8 @@ public class KeyGenUtils {
      */
     private static AlgorithmParameterSpec getKeyGenSpecForAlgorithm(String algorithmName)
             throws UnsupportedOperationException {
+        assert (!AlgorithmNameUtils.isCompositeName(algorithmName) && !AlgorithmNameUtils.isNestedName(algorithmName));
+
         switch (algorithmName) {
             case "RSA":
                 return new RSAKeyGenParameterSpec(3072, BigInteger.valueOf(65537), null);

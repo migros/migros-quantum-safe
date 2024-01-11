@@ -2,12 +2,16 @@ package ch.migros.quantumproto.util;
 
 import java.security.cert.CertificateException;
 
+import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo;
 import org.bouncycastle.cert.X509CertificateHolder;
+import org.bouncycastle.jcajce.spec.CompositeAlgorithmSpec;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.bouncycastle.operator.ContentVerifier;
 import org.bouncycastle.operator.OperatorCreationException;
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
-import org.bouncycastle.operator.jcajce.JcaContentVerifierProviderBuilder;
+
+import ch.migros.quantumproto.hybrid.HybridContentSignerBuilder;
+import ch.migros.quantumproto.hybrid.HybridContentVerifierProviderBuilder;
 
 /**
  * Utility class to support hybrid signatures and certificates
@@ -47,7 +51,18 @@ public class SignatureUtils {
      */
     public static JcaContentSignerBuilder getContentSignerBuilder(String algorithmName)
             throws UnsupportedOperationException {
-        return new JcaContentSignerBuilder(algorithmName).setProvider(BouncyCastleProvider.PROVIDER_NAME);
+        if (AlgorithmNameUtils.isCompositeName(algorithmName)) {
+            CompositeAlgorithmSpec spec = AlgorithmNameUtils.getCompositeAlgorithmSpec(algorithmName);
+            return new HybridContentSignerBuilder("COMPOSITE", spec).setProvider(BouncyCastleProvider.PROVIDER_NAME);
+        } else if (AlgorithmNameUtils.isNestedName(algorithmName)) {
+            // Should use CertificateUtils to create e.g. X.509 directly
+            // There, we directly use only outer or inner algorithm names and the
+            // appropriate keys
+            throw new UnsupportedOperationException(
+                    "Tried to create a ContentSigner for a nested algorithm");
+        } else {
+            return new HybridContentSignerBuilder(algorithmName).setProvider(BouncyCastleProvider.PROVIDER_NAME);
+        }
     }
 
     /**
@@ -65,7 +80,16 @@ public class SignatureUtils {
      */
     public static ContentVerifier getContentVerifier(X509CertificateHolder cert, String algorithmName)
             throws OperatorCreationException, CertificateException {
-        return new JcaContentVerifierProviderBuilder().build(cert)
+        if (AlgorithmNameUtils.isNestedName(algorithmName))
+            throw new UnsupportedOperationException("Tried to create a ContentVerifier for a nested algorithm");
+
+        SubjectPublicKeyInfo key = CertificateUtils.extractPublicKeyForUseWith(cert, algorithmName);
+        if (key == null) {
+            throw new IllegalArgumentException(
+                    "Key for algorithm '" + algorithmName + "' not found in provided certificate.");
+        }
+
+        return new HybridContentVerifierProviderBuilder().build(cert)
                 .get(AlgorithmNameUtils.getSigAlgIdentifier(algorithmName));
     }
 
