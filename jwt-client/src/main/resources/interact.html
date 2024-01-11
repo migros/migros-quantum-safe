@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <link rel="stylesheet" href="http://getskeleton.com/dist/css/normalize.css">
+    <link rel="stylesheet" href="http://getskeleton.com/dist/css/skeleton.css">
+    <script>
+        var populated = false;
+        function populateFrame() {
+            if (populated) {
+                // add CSS
+                return;
+            } else {
+                populated = true;
+                var doc = document.getElementById('responseframe').contentWindow.document;
+                doc.open();
+                doc.write("<html lang=\"en-US\"><body><p>Submit form above to see repsonse here</p></body></html>");
+                doc.close();
+            }
+        }
+    </script>
+</head>
+
+<body style="max-width: 800px; margin: 0 auto;">
+    <div style="width: 80%; position: relative; margin: 0 auto; box-sizing: border-box; display: block;">
+        <h1 style="text-align: center; margin-top: 0.67em;">Quantum-Safe Prototype</h1>
+
+        <div>
+            <h4>Request:</h4>
+            <form action="/run-interaction/" method="post" target="responseframe">
+                <label for="fname">Message:</label>
+                <input name="message" type="text"><br>
+                <input type="submit" value="Submit" class="button-primary">
+            </form>
+        </div>
+
+        <div>
+            <h4>Response:</h4>
+            <iframe name="responseframe" id="responseframe" onload="populateFrame()"
+                style="width: 100%; height: 200px;" />
+        </div>
+    </div>
+
+</body>
+
+</html>

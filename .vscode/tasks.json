@@ -1,0 +1,41 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Docker-Compose Down",
+            "type": "shell",
+            "command": "docker compose down -t 1",
+            "group": "none"
+        },
+        {
+            "label": "clean",
+            "type": "shell",
+            "command": "mvn -B clean",
+            "group": "none"
+        },
+        {
+            "label": "package",
+            "type": "shell",
+            "dependsOn": [
+                "clean"
+            ],
+            "command": "mvn -B package -DskipTests",
+            "group": "build"
+        },
+        {
+            "label": "Docker-Compose Up",
+            "type": "shell",
+            "dependsOn": [
+                "Docker-Compose Down",
+                "package"
+            ],
+            "command": "docker compose build --progress plain && docker compose up --force-recreate",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        }
+    ]
+}
