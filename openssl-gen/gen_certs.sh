@@ -1,6 +1,6 @@
 #!/bin/sh
-LONG_TERM_SIG=rsa
-END_USER_SIG=ed25519
+LONG_TERM_SIG=dilithium5
+END_USER_SIG=dilithium5
 
 PROV_ARGS="-provider-path /oqs-provider/_build/oqsprov -provider oqsprovider"
 
