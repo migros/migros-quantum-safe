@@ -14,6 +14,14 @@
 
   <name>JWT Verifier</name>
 
+  <dependencies>
+    <dependency>
+      <groupId>ch.migros.quantumproto</groupId>
+      <artifactId>crypto-agility-lib</artifactId>
+      <version>${revision}</version>
+    </dependency>
+  </dependencies>
+
   <build>
     <plugins>
       <plugin>

@@ -126,6 +126,7 @@
   </build>
 
   <modules>
+    <module>crypto-agility-lib</module>
     <module>cert-auth</module>
     <module>jwt-creator</module>
     <module>jwt-verifier</module>
