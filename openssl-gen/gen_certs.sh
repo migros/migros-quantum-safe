@@ -1,15 +1,23 @@
 #!/bin/sh
+LONG_TERM_SIG=rsa
+END_USER_SIG=ed25519
+
+PROV_ARGS="-provider-path /oqs-provider/_build/oqsprov -provider oqsprovider"
+
+echo "The following providers are present:"
+openssl list -providers $PROV_ARGS
+
 cd /
 # Create CA key and self-signed certificate
-openssl req -x509 -new -newkey rsa -keyout caKey.pem -out caCert.pem --outform PEM -nodes -subj "/C=CH/O=Cyber/CN=Cyber Root CA" -days 3652
+openssl req -x509 -new -newkey $LONG_TERM_SIG -keyout caKey.pem -out caCert.pem --outform PEM -nodes -subj "/C=CH/O=Cyber/CN=Cyber Root CA" -days 3652 $PROV_ARGS
 
 # Create end user key and CSR
-openssl req -new -newkey ed25519 -keyout moonKey.pem -out moonCert.csr -nodes -subj "/emailAddress=moon@strongswan.org/C=CH/O=Cyber/CN=moon.strongswan.org"
-openssl req -new -newkey ed25519 -keyout carolKey.pem -out carolCert.csr -nodes -subj "/emailAddress=carol@strongswan.org/C=CH/O=Cyber/CN=carol.strongswan.org"
+openssl req -new -newkey $END_USER_SIG -keyout moonKey.pem -out moonCert.csr -nodes -subj "/emailAddress=moon@strongswan.org/C=CH/O=Cyber/CN=moon.strongswan.org" $PROV_ARGS
+openssl req -new -newkey $END_USER_SIG -keyout carolKey.pem -out carolCert.csr -nodes -subj "/emailAddress=carol@strongswan.org/C=CH/O=Cyber/CN=carol.strongswan.org" $PROV_ARGS
 
 # Sign CSR by CA
-openssl x509 -req -in moonCert.csr -out moonCert.pem -CA caCert.pem -CAkey caKey.pem --outform PEM -CAcreateserial -days 365 -extfile v3.ext
-openssl x509 -req -in carolCert.csr -out carolCert.pem -CA caCert.pem -CAkey caKey.pem --outform PEM -CAcreateserial -days 365 -extfile v3.ext
+openssl x509 -req -in moonCert.csr -out moonCert.pem -CA caCert.pem -CAkey caKey.pem --outform PEM -CAcreateserial -days 365 -extfile v3.ext $PROV_ARGS
+openssl x509 -req -in carolCert.csr -out carolCert.pem -CA caCert.pem -CAkey caKey.pem --outform PEM -CAcreateserial -days 365 -extfile v3.ext $PROV_ARGS
 
 echo "Generated all keys/certs"
 
