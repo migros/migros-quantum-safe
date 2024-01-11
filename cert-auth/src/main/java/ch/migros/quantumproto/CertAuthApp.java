@@ -1,5 +1,6 @@
 package ch.migros.quantumproto;
 
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -7,17 +8,15 @@ import java.math.BigInteger;
 import java.net.InetSocketAddress;
 import java.security.InvalidAlgorithmParameterException;
 import java.security.KeyPair;
-import java.security.KeyPairGenerator;
 import java.security.NoSuchAlgorithmException;
 import java.security.NoSuchProviderException;
-import java.security.SecureRandom;
 import java.security.Security;
-import java.security.spec.RSAKeyGenParameterSpec;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Properties;
 
 import org.bouncycastle.asn1.ASN1Encodable;
 import org.bouncycastle.asn1.ASN1ObjectIdentifier;
@@ -29,14 +28,15 @@ import org.bouncycastle.cert.X509CertificateHolder;
 import org.bouncycastle.cert.X509v3CertificateBuilder;
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
-import org.bouncycastle.operator.ContentSigner;
 import org.bouncycastle.operator.OperatorCreationException;
-import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
 import org.bouncycastle.pkcs.PKCS10CertificationRequest;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
+
+import ch.migros.quantumproto.util.CertificateUtils;
+import ch.migros.quantumproto.util.KeyGenUtils;
 
 /**
  * Defines a microservice called "Cert-Auth" which creates a self-signed root
@@ -47,6 +47,30 @@ public class CertAuthApp {
     private static Map<String, KeyPair> keyPairs = new HashMap<>(2);
     private static Map<String, X509CertificateHolder> certs = new HashMap<>(2);
 
+    private static String TLS_SIG_ALG;
+    private static String APP_SIG_ALG;
+
+    private static final String CONFIG_FILE_PATH = "/crypto_config.ini";
+
+    static {
+        // Load config file
+        Properties configProps = new Properties();
+        try {
+            FileInputStream in = new FileInputStream(CONFIG_FILE_PATH);
+            configProps.load(in);
+            in.close();
+        } catch (Exception e) {
+            System.out.println("Error: could not load config.");
+            e.printStackTrace();
+        }
+
+        // Extract algorithm identifiers from config
+        TLS_SIG_ALG = configProps.getProperty("TLS_SIG_ALG");
+        assert (TLS_SIG_ALG != null);
+        APP_SIG_ALG = configProps.getProperty("APP_SIG_ALG");
+        assert (APP_SIG_ALG != null);
+    }
+
     public static void main(String[] args) throws InterruptedException {
         System.out.println("I am a CA!");
 
@@ -54,8 +78,8 @@ public class CertAuthApp {
 
         // Create new root certificates
         try {
-            create_root_certificate("tls");
-            create_root_certificate("app");
+            create_root_certificate("tls", TLS_SIG_ALG);
+            create_root_certificate("app", APP_SIG_ALG);
         } catch (Exception e) {
             System.out.println("Certificate creation failed: " + e.getMessage());
             return;
@@ -76,16 +100,17 @@ public class CertAuthApp {
     }
 
     /**
-     * Creates a self-signed certificate with a fresh RSA key pair.
+     * Creates a self-signed certificate with a fresh key pair
+     * according to the configuration file.
      * Saves the resulting key pair and certificate as part of static
      * {@code keyPair} and {@code certs} maps respectively.
      * 
      * @param mapKey the key under which to save the results
      * @throws OperatorCreationException if certificate signing fails
      */
-    private static void create_root_certificate(String mapKey)
-            throws NoSuchAlgorithmException, NoSuchProviderException, InvalidAlgorithmParameterException,
-            OperatorCreationException {
+    private static void create_root_certificate(String mapKey, String sigAlg)
+            throws OperatorCreationException, NoSuchAlgorithmException,
+            NoSuchProviderException, InvalidAlgorithmParameterException {
         if (keyPairs.containsKey(mapKey))
             throw new IllegalStateException("Already created root certificate before");
 
@@ -97,21 +122,14 @@ public class CertAuthApp {
         Date notBDate = Date.from(notBefore.atZone(ZoneId.of("Europe/Paris")).toInstant());
         Date notADate = Date.from(notAfter.atZone(ZoneId.of("Europe/Paris")).toInstant());
 
-        // Generate RSA-3072 Key pair
-        KeyPairGenerator gen = KeyPairGenerator.getInstance("RSA", BouncyCastleProvider.PROVIDER_NAME);
-        gen.initialize(new RSAKeyGenParameterSpec(3072, BigInteger.valueOf(65537), null), new SecureRandom());
-
-        KeyPair pair = gen.generateKeyPair();
+        // Generate Key pair
+        KeyPair pair = KeyGenUtils.generateKeyPair(sigAlg);
         keyPairs.put(mapKey, pair);
 
         // Build self-signed certificate
         X509v3CertificateBuilder builder = new JcaX509v3CertificateBuilder(issuerSubject, BigInteger.ONE,
                 notBDate, notADate, issuerSubject, pair.getPublic());
-
-        ContentSigner signer = new JcaContentSignerBuilder("SHA256WITHRSA")
-                .setProvider(BouncyCastleProvider.PROVIDER_NAME)
-                .build(pair.getPrivate());
-        X509CertificateHolder cert = builder.build(signer);
+        X509CertificateHolder cert = CertificateUtils.signCert(builder, sigAlg, pair);
         certs.put(mapKey, cert);
     }
 
@@ -119,8 +137,8 @@ public class CertAuthApp {
         HttpServer server = HttpServer.create(new InetSocketAddress(80), 0);
         server.createContext("/cert-app/", new CertHandler(certs.get("app")));
         server.createContext("/cert/", new CertHandler(certs.get("tls")));
-        server.createContext("/sign-app/", new SignHandler(keyPairs.get("app")));
-        server.createContext("/sign/", new SignHandler(keyPairs.get("tls")));
+        server.createContext("/sign-app/", new SignHandler(APP_SIG_ALG, keyPairs.get("app")));
+        server.createContext("/sign/", new SignHandler(TLS_SIG_ALG, keyPairs.get("tls")));
         server.setExecutor(null); // creates a default executor
         server.start();
     }
@@ -159,8 +177,10 @@ class CertHandler implements HttpHandler {
 class SignHandler implements HttpHandler {
     private BigInteger serial;
     private KeyPair keyPair;
+    private String sigAlg;
 
-    public SignHandler(KeyPair keyPair) {
+    public SignHandler(String sigAlg, KeyPair keyPair) {
+        this.sigAlg = sigAlg;
         this.keyPair = keyPair;
         serial = BigInteger.TWO;
     }
@@ -208,10 +228,7 @@ class SignHandler implements HttpHandler {
             }
 
             try {
-                ContentSigner signer = new JcaContentSignerBuilder("SHA256WITHRSA")
-                        .setProvider(BouncyCastleProvider.PROVIDER_NAME)
-                        .build(keyPair.getPrivate());
-                X509CertificateHolder certSigned = builder.build(signer);
+                X509CertificateHolder certSigned = CertificateUtils.signCert(builder, sigAlg, keyPair);
                 byte[] response = certSigned.getEncoded();
                 t.getResponseHeaders().set("Content-Type", "application/octet-stream");
                 t.sendResponseHeaders(200, response.length);

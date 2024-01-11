@@ -1,11 +1,11 @@
 package ch.migros.quantumproto;
 
 import java.io.ByteArrayInputStream;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.StringWriter;
-import java.math.BigInteger;
 import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
 import java.net.URL;
@@ -13,7 +13,6 @@ import java.nio.charset.StandardCharsets;
 import java.security.InvalidAlgorithmParameterException;
 import java.security.KeyManagementException;
 import java.security.KeyPair;
-import java.security.KeyPairGenerator;
 import java.security.KeyStore;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
@@ -25,11 +24,11 @@ import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.security.spec.InvalidKeySpecException;
-import java.security.spec.RSAKeyGenParameterSpec;
 import java.util.Base64;
 import java.util.Base64.Encoder;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Properties;
 
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
@@ -41,10 +40,7 @@ import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.bouncycastle.jsse.provider.BouncyCastleJsseProvider;
 import org.bouncycastle.operator.ContentSigner;
 import org.bouncycastle.operator.OperatorCreationException;
-import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
 import org.bouncycastle.pkcs.PKCS10CertificationRequest;
-import org.bouncycastle.pkcs.PKCS10CertificationRequestBuilder;
-import org.bouncycastle.pkcs.jcajce.JcaPKCS10CertificationRequestBuilder;
 import org.bouncycastle.util.io.pem.PemObject;
 import org.bouncycastle.util.io.pem.PemWriter;
 import org.json.JSONObject;
@@ -53,6 +49,11 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpsConfigurator;
 import com.sun.net.httpserver.HttpsServer;
+
+import ch.migros.quantumproto.util.CertificateUtils;
+import ch.migros.quantumproto.util.JWTUtils;
+import ch.migros.quantumproto.util.KeyGenUtils;
+import ch.migros.quantumproto.util.SignatureUtils;
 
 /**
  * Defines a microservice called "JWT-Creator" which generates a fresh key pair
@@ -63,6 +64,29 @@ public class JWTCreatorApp {
     private static Map<String, X509CertificateHolder> certsSelf = new HashMap<>(2);
     private static X509CertificateHolder certTlsRoot;
     private static Map<String, KeyPair> keyPairs = new HashMap<>(2);
+    private static String TLS_SIG_ALG;
+    private static String APP_JSON_ID;
+
+    private static final String CONFIG_FILE_PATH = "/crypto_config.ini";
+
+    static {
+        // Load config file or resort to default
+        Properties defaultProps = new Properties();
+        try {
+            FileInputStream in = new FileInputStream(CONFIG_FILE_PATH);
+            defaultProps.load(in);
+            in.close();
+        } catch (Exception e) {
+            System.out.println("Error: could not load config.");
+            e.printStackTrace();
+        }
+
+        TLS_SIG_ALG = defaultProps.getProperty("TLS_SIG_ALG");
+        assert (TLS_SIG_ALG != null);
+
+        APP_JSON_ID = defaultProps.getProperty("APP_JSON_ID");
+        assert (APP_JSON_ID != null);
+    }
 
     public static void main(String[] args) {
         System.out.println("I am a JWT Creator!");
@@ -82,8 +106,9 @@ public class JWTCreatorApp {
 
         // Create new certificates, submit CSRs to CA
         try {
-            get_signed_certificate("tls", "sign");
-            get_signed_certificate("app", "sign-app");
+            get_signed_certificate("tls", TLS_SIG_ALG, "sign");
+            get_signed_certificate("app", JWTUtils.algToSigAlgName(APP_JSON_ID),
+                    "sign-app");
         } catch (Exception e) {
             System.out.println("End-User certificate acquisition failed: " + e.getMessage());
             return;
@@ -123,8 +148,8 @@ public class JWTCreatorApp {
     }
 
     /**
-     * Requests a CA-signed certificate with a fresh RSA key pair.
-     * To that end, a suitable CSR is submitted to the CA.
+     * Requests a CA-signed certificate with a fresh key pair according to the
+     * configuration file. To that end, a suitable CSR is submitted to the CA.
      * Saves the resulting key pair and certificate as part of static
      * {@code keyPair} and {@code certs} maps respectively.
      * 
@@ -137,26 +162,18 @@ public class JWTCreatorApp {
      * @throws NoSuchAlgorithmException           if key generation fails
      * @throws InvalidAlgorithmParameterException if key generation fails
      */
-    private static void get_signed_certificate(String mapKey, String signEndpoint)
+    private static void get_signed_certificate(String mapKey, String sigAlg, String signEndpoint)
             throws IOException, OperatorCreationException,
             NoSuchAlgorithmException, NoSuchProviderException, InvalidAlgorithmParameterException {
         // Parameters
         X500Name subject = new X500Name("CN=jwt-creator");
 
-        // Generate RSA-3072 Key pair
-        KeyPairGenerator gen = KeyPairGenerator.getInstance("RSA", BouncyCastleProvider.PROVIDER_NAME);
-        gen.initialize(new RSAKeyGenParameterSpec(3072, BigInteger.valueOf(65537), null), new SecureRandom());
-
-        KeyPair keyPair = gen.generateKeyPair();
+        // Generate Key pair
+        KeyPair keyPair = KeyGenUtils.generateKeyPair(sigAlg);
         keyPairs.put(mapKey, keyPair);
 
         // Build CSR without extensions
-        ContentSigner signer = new JcaContentSignerBuilder("SHA256WITHRSA")
-                .setProvider(BouncyCastleProvider.PROVIDER_NAME)
-                .build(keyPair.getPrivate());
-        PKCS10CertificationRequestBuilder csrBuilder = new JcaPKCS10CertificationRequestBuilder(subject,
-                keyPair.getPublic());
-        PKCS10CertificationRequest csr = csrBuilder.build(signer);
+        PKCS10CertificationRequest csr = CertificateUtils.createCertificationRequest(sigAlg, keyPair, subject, null);
 
         // Submit CSR for signing
         URL url = new URL("http://cert-auth/" + signEndpoint + "/");
@@ -234,7 +251,7 @@ public class JWTCreatorApp {
         sslContext.init(kmf.getKeyManagers(), tmf.getTrustManagers(), new SecureRandom());
         server.setHttpsConfigurator(new HttpsConfigurator(sslContext));
 
-        server.createContext("/jwt-create/", new CreateHandler(keyPairs.get("app"), certsSelf.get("app")));
+        server.createContext("/jwt-create/", new CreateHandler(keyPairs.get("app"), certsSelf.get("app"), APP_JSON_ID));
         server.setExecutor(null); // creates a default executor
         server.start();
     }
@@ -243,16 +260,20 @@ public class JWTCreatorApp {
 /**
  * HTTP request handler for a JWT creation endpoint.
  * Responds to any POST with a JWT containing the request body, signed using the
- * key pair. The response is accompanied with the certificate provided in the
- * constructor.
+ * key pair and signature algorithm provided in the constructor. The response
+ * is accompanied with the certificate provided in the constructor.
  */
 class CreateHandler implements HttpHandler {
     private KeyPair keyPair;
     private X509CertificateHolder cert;
+    private String jsonId;
+    private String sigAlg;
 
-    public CreateHandler(KeyPair keyPair, X509CertificateHolder cert) {
+    public CreateHandler(KeyPair keyPair, X509CertificateHolder cert, String jsonId) {
         this.keyPair = keyPair;
         this.cert = cert;
+        this.jsonId = jsonId;
+        this.sigAlg = JWTUtils.algToSigAlgName(jsonId);
     }
 
     public void handle(HttpExchange t) throws IOException {
@@ -275,7 +296,7 @@ class CreateHandler implements HttpHandler {
 
             // Create JWT
             JSONObject header = new JSONObject();
-            header.put("alg", "RS256");
+            header.put("alg", jsonId);
             header.put("typ", "JWT");
 
             JSONObject payload = new JSONObject();
@@ -289,9 +310,7 @@ class CreateHandler implements HttpHandler {
                     + enc.encodeToString(payload.toString().getBytes());
 
             // Sign JWT
-            ContentSigner signer = new JcaContentSignerBuilder("SHA256WITHRSA")
-                    .setProvider(BouncyCastleProvider.PROVIDER_NAME)
-                    .build(keyPair.getPrivate());
+            ContentSigner signer = SignatureUtils.getContentSignerBuilder(sigAlg).build(keyPair.getPrivate());
 
             try (OutputStream os = signer.getOutputStream()) {
                 os.write(tbs.getBytes());

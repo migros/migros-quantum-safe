@@ -11,19 +11,19 @@ import java.security.Security;
 import java.util.Base64;
 import java.util.Base64.Decoder;
 
-import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo;
 import org.bouncycastle.cert.X509CertificateHolder;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.bouncycastle.operator.ContentVerifier;
-import org.bouncycastle.operator.ContentVerifierProvider;
-import org.bouncycastle.operator.DefaultSignatureAlgorithmIdentifierFinder;
 import org.bouncycastle.operator.OperatorCreationException;
-import org.bouncycastle.operator.jcajce.JcaContentVerifierProviderBuilder;
 import org.json.JSONObject;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
+
+import ch.migros.quantumproto.util.CertificateUtils;
+import ch.migros.quantumproto.util.JWTUtils;
+import ch.migros.quantumproto.util.SignatureUtils;
 
 /**
  * Defines a microservice called "JWT-Verifier" which receives JWTs via HTTP and
@@ -49,13 +49,8 @@ public class JWTVerifierApp {
 
         // Verify CA certificate
         try {
-            // Extract parent key and build VerifierProvider
-            SubjectPublicKeyInfo publicKey = cert.getSubjectPublicKeyInfo();
-            ContentVerifierProvider vProv = new JcaContentVerifierProviderBuilder()
-                    .setProvider(BouncyCastleProvider.PROVIDER_NAME)
-                    .build(publicKey);
-            assert cert.isSignatureValid(vProv);
-        } catch (AssertionError | Exception e) {
+            assert CertificateUtils.checkCert(cert, cert);
+        } catch (Exception e) {
             System.out.println("Certificate did not verify: " + e.getMessage());
             return;
         }
@@ -139,12 +134,7 @@ class VerifyHandler implements HttpHandler {
 
             // Verify chain
             try {
-                // Extract parent key and build VerifierProvider
-                SubjectPublicKeyInfo publicKey = rootCert.getSubjectPublicKeyInfo();
-                ContentVerifierProvider vProv = new JcaContentVerifierProviderBuilder()
-                        .setProvider(BouncyCastleProvider.PROVIDER_NAME)
-                        .build(publicKey);
-                if (!cert.isSignatureValid(vProv)) {
+                if (!CertificateUtils.checkCert(cert, rootCert)) {
                     throw new IllegalArgumentException("Certificate is not valid");
                 }
             } catch (Exception e) {
@@ -160,6 +150,7 @@ class VerifyHandler implements HttpHandler {
             JSONObject header;
             JSONObject payload;
             byte[] signature;
+            String sigAlg;
             try {
                 assert jwtParts.length == 3;
                 header = new JSONObject(new String(dec.decode(jwtParts[0])));
@@ -167,23 +158,18 @@ class VerifyHandler implements HttpHandler {
                 tbs = jwtParts[0] + "." + jwtParts[1];
                 signature = dec.decode(jwtParts[2]);
 
-                // Check claimed signature algorithm
-                assert header.get("alg") instanceof String;
-                assert ((String) header.get("alg")).equals("RS256");
+                // Determine claimed signature algorithm
+                sigAlg = JWTUtils.algToSigAlgName((String) header.get("alg"));
+
             } catch (IndexOutOfBoundsException e) {
                 System.out.println("Unable to parse JWT: " + e.getMessage());
-                t.sendResponseHeaders(400, -1);
-                return;
-            } catch (AssertionError e) {
-                System.out.println("Unsupported signature algorithm: " + e.getMessage());
                 t.sendResponseHeaders(400, -1);
                 return;
             }
 
             // Verify signature
             try {
-                ContentVerifier clientVerifier = new JcaContentVerifierProviderBuilder().build(cert)
-                        .get(new DefaultSignatureAlgorithmIdentifierFinder().find("SHA256WITHRSA"));
+                ContentVerifier clientVerifier = SignatureUtils.getContentVerifier(cert, sigAlg);
                 try (OutputStream os = clientVerifier.getOutputStream()) {
                     os.write(tbs.getBytes());
                 }
